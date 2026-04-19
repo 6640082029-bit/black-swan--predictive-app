@@ -1,572 +1,624 @@
+# ╔══════════════════════════════════════════════════════════╗
+# ║   Black Swan Event Prediction Model                      ║
+# ╚══════════════════════════════════════════════════════════╝
 import streamlit as st
 import pandas as pd
 import numpy as np
+import yfinance as yf
 import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-import datetime
-import warnings
-warnings.filterwarnings('ignore')
+import streamlit.components.v1 as components
 
+# ── Page config ───────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Black Swan Predictor",
+    page_title="Black Swan Event Prediction Model",
     page_icon="🦢",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed",
 )
 
-# ── CSS ──────────────────────────────────────────────────────────────
+# ── Global CSS ────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Syne:wght@700;800&display=swap');
-html, body, [class*="css"] { background-color: #0a0c10; color: #e8ecf5; }
-h1,h2,h3 { font-family: 'Syne', sans-serif; color: #e8ecf5 !important; }
-.metric-card {
-    background: #111318; border: 1px solid #2a2f3d;
-    border-radius: 12px; padding: 16px 20px; text-align: center;
+@import url('https://fonts.googleapis.com/css2?family=Anuphan:wght@300;400;600&display=swap');
+
+html, body, [data-testid="stAppViewContainer"] {
+    background-color: #F8FAFC !important;
+    font-family: 'Anuphan', sans-serif;
 }
-.metric-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #4a5268; text-transform: uppercase; letter-spacing: 0.08em; }
-.metric-value { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; margin: 4px 0; }
-.risk-box {
-    border-radius: 14px; padding: 24px; text-align: center;
-    border: 1px solid #2a2f3d; background: #111318;
+
+/* ── Section header ── */
+.sec-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 22px; border-radius: 12px;
+    margin: 32px 0 20px 0;
+    border-left: 5px solid;
 }
-.insight-box {
-    background: #111318; border: 1px solid #2a2f3d;
-    border-left: 3px solid #f5a623; border-radius: 8px;
-    padding: 14px 18px; margin: 8px 0;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #8892aa;
+.sec-header.blue  { background:#EFF6FF; border-color:#3B82F6; }
+.sec-header.green { background:#F0FDF4; border-color:#10B981; }
+.sec-header.violet{ background:#F5F3FF; border-color:#8B5CF6; }
+.sec-tag   { font-size:11px; font-weight:600; letter-spacing:.1em;
+             text-transform:uppercase; opacity:.6; }
+.sec-title { font-size:1.35rem; font-weight:600; margin:0; }
+
+/* ── Cards ── */
+.card {
+    background:#ffffff; border-radius:14px; padding:20px 22px;
+    border:1px solid #E2E8F0; box-shadow:0 2px 6px rgba(0,0,0,.05);
+    height:100%;
 }
-.stButton>button {
-    background: rgba(255,59,78,0.1); border: 1px solid #ff3b4e;
-    color: #ff3b4e; font-family: 'JetBrains Mono', monospace;
-    font-weight: 700; border-radius: 8px; padding: 8px 20px;
+.card-dark {
+    background:#0F172A; border-radius:14px; padding:20px 22px;
+    color:#F1F5F9;
 }
-.stButton>button:hover { background: #ff3b4e; color: white; }
-div[data-testid="stMetricValue"] > div { font-family: 'JetBrains Mono', monospace; }
+
+/* ── Metric tile ── */
+.stMetric {
+    background:#ffffff; padding:18px; border-radius:12px;
+    border:1px solid #E2E8F0; box-shadow:0 2px 4px rgba(0,0,0,.04);
+}
+
+/* ── Status box ── */
+.status-box {
+    text-align:center; padding:22px 18px; border-radius:12px;
+    background:white; border:1px solid #E2E8F0;
+    box-shadow:0 2px 6px rgba(0,0,0,.05);
+}
+
+/* ── Divider ── */
+.swan-hr { border:none; border-top:1px solid #E2E8F0; margin:30px 0; }
+
+/* ── Probability pill ── */
+.prob-pill {
+    display:inline-block; padding:6px 16px; border-radius:20px;
+    font-weight:600; font-size:.85rem; margin:4px;
+}
+
+/* ── Shake animation for panic duck ── */
+.shake { animation: shake 0.5s infinite; display:inline-block; }
+@keyframes shake {
+    0%   { transform: translate(1px,1px)  rotate(0deg); }
+    10%  { transform: translate(-1px,-2px) rotate(-1deg); }
+    20%  { transform: translate(-3px,0px)  rotate(1deg); }
+    50%  { transform: translate(0px,2px)   rotate(0deg); }
+    100% { transform: translate(1px,-2px)  rotate(-1deg); }
+}
+
+/* ── App title bar ── */
+.app-title-bar {
+    background: linear-gradient(135deg, #0F172A 0%, #1E3A5F 100%);
+    border-radius: 16px; padding: 28px 36px; margin-bottom: 28px;
+    display: flex; align-items: center; justify-content: space-between;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ── HELPERS ──────────────────────────────────────────────────────────
-def risk_color(score):
-    if score < 15:  return "#22c55e"
-    if score < 30:  return "#f5a623"
-    if score < 60:  return "#ff8c00"
-    return "#ff3b4e"
 
-def risk_label(score):
-    if score < 15:  return "NORMAL"
-    if score < 30:  return "ELEVATED"
-    if score < 60:  return "HIGH DANGER"
-    return "EXTREME CRISIS"
+# ════════════════════════════════════════════════════════════
+# BACKEND — shared functions (เหมือนเดิมทุก logic)
+# ════════════════════════════════════════════════════════════
 
-# ── DATA LOADING ─────────────────────────────────────────────────────
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_all_inputs():
-    import yfinance as yf
-    import pandas_datareader.data as web
-
-    start_date = "1995-01-01"
-    end_date   = datetime.datetime.now().strftime('%Y-%m-%d')
-
+def fetch_historical_data():
+    """Section 1 — long-horizon data since 1975."""
     tickers = {
-        "NSE_India":  "^NSEI",
-        "NYSE":       "^NYA",
-        "SSE":        "000001.SS",
-        "JPX":        "^N225",
-        "Euronext":   "^N100",
-        "LSE":        "^FTSE",
-        "VIX":        "^VIX",
-        "Gold":       "GC=F",
-        "Crude_Oil":  "BZ=F",
-        "Copper":     "HG=F",
-        "USD_Index":  "DX-Y.NYB",
-        "SP500":      "^GSPC",
+        'NSE_India': '^NSEI', 'NYSE': '^NYA', 'SSE': '000001.SS',
+        'JPX': '^N225', 'Euronext': '^N100', 'LSE': '^FTSE',
+        'VIX': '^VIX', 'Gold': 'GC=F', 'Crude_Oil': 'BZ=F',
+        'Copper': 'HG=F', 'USD_Index': 'DX-Y.NYB',
+        '10Y_Bond': '^TNX', '2Y_Bond': '^IRX',
     }
+    df = yf.download(list(tickers.values()), start="1975-01-01", progress=False)['Close']
+    if df.empty:
+        return None, None, None, None
+    df = df.ffill().bfill()
+    df = df.rename(columns={v: k for k, v in tickers.items()})
+    latest = df.iloc[-1]
+    prev   = df.iloc[-2]
 
-    df_yf = yf.download(list(tickers.values()), start=start_date, end=end_date, progress=False)['Close']
-    df_yf = df_yf.rename(columns={v: k for k, v in tickers.items()})
-    df_yf['Gold_Copper_Ratio'] = df_yf['Gold'] / df_yf['Copper']
+    price_cols  = ['NSE_India','NYSE','SSE','JPX','Euronext','LSE','Gold','Crude_Oil','USD_Index']
+    valid_cols  = [c for c in price_cols if c in df.columns]
+    df_norm     = df[valid_cols].copy()
+    for col in df_norm.columns:
+        first = df_norm[col].dropna().iloc[0]
+        df_norm[col] = (df_norm[col] / first) * 100
+    return df, df_norm, latest, prev
 
-    try:
-        df_macro = web.DataReader(['T10Y2Y', 'FEDFUNDS'], 'fred', start_date, end_date)
-        df_macro.columns = ['Yield_Curve_Spread', 'FED_Rate']
-        final_df = pd.concat([df_yf, df_macro], axis=1).ffill()
-    except Exception:
-        final_df = df_yf.copy()
-        final_df['Yield_Curve_Spread'] = np.nan
-        final_df['FED_Rate'] = np.nan
-        final_df = final_df.ffill()
-
-    return final_df
-
-# ── FRAGILITY ENGINE ─────────────────────────────────────────────────
-@st.cache_data(ttl=3600, show_spinner=False)
-def build_fragility(_df):
-    df = _df.copy()
-    frag = pd.DataFrame(index=df.index)
-    markets = ['NSE_India','NYSE','SSE','JPX','Euronext','LSE']
-
-    for m in markets:
-        if m in df.columns:
-            ret = df[m].pct_change()
-            frag[f'{m}_Kurtosis'] = ret.rolling(252).kurt()
-            frag[f'{m}_Vol']      = ret.rolling(252).std() * np.sqrt(252)
-
-    world_cols = [c for c in ['NYSE','SSE','JPX','Euronext','LSE'] if c in df.columns]
-    corrs = [df['NSE_India'].pct_change().rolling(60).corr(df[c].pct_change()) for c in world_cols]
-    if corrs:
-        frag['India_Global_Correlation'] = pd.concat(corrs, axis=1).mean(axis=1)
-
-    if 'Yield_Curve_Spread' in df.columns:
-        frag['Yield_Curve'] = df['Yield_Curve_Spread']
-    if 'Gold_Copper_Ratio' in df.columns:
-        frag['Gold_Copper_Ratio'] = df['Gold_Copper_Ratio']
-
-    frag = frag.dropna()
-
-    # Label known crises
-    frag['Event_Label'] = 'Normal'
-    frag['Is_Crisis']   = 0
-    crises = [
-        ('1997-07-01','1998-06-30','Asian Financial Crisis'),
-        ('2000-03-01','2002-09-30','Dot-com Crash'),
-        ('2008-09-01','2009-06-30','Global Financial Crisis'),
-        ('2011-08-01','2011-10-31','European Debt Crisis'),
-        ('2015-08-01','2015-09-30','China Crash'),
-        ('2018-12-01','2019-01-31','US-China Trade War'),
-        ('2020-02-01','2020-05-31','COVID-19 Crash'),
-        ('2022-01-01','2022-10-31','Rate Hike Shock'),
-    ]
-    for s, e, name in crises:
-        frag.loc[s:e, 'Event_Label'] = name
-        frag.loc[s:e, 'Is_Crisis']   = 1
-
-    return frag
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def build_advanced(_frag):
-    df = _frag.copy()
-    vol_cols = [c for c in df.columns if 'Vol' in c]
-    df['Systemic_Stress']  = df[vol_cols].mean(axis=1) * df['India_Global_Correlation']
-    df['Fragility_Score']  = df['Systemic_Stress'].rolling(126).mean()
-    if 'Gold_Copper_Ratio' in df.columns and 'NYSE_Vol' in df.columns:
-        df['Early_Warning_Signal'] = df['Gold_Copper_Ratio'].pct_change() / df['NYSE_Vol']
-    df['Macro_Fragility_Combo'] = df['Gold_Copper_Ratio'] * df['NSE_India_Kurtosis']
-    df = df.dropna(subset=['Fragility_Score'])
+def get_market_data():
+    """Section 2 — recent data for metric calculation."""
+    tickers = {
+        "NSE_India": "^NSEI", "NYSE": "^NYA",  "SSE": "000001.SS",
+        "JPX": "^N225",       "Euronext": "^N100", "LSE": "^FTSE",
+        "Gold": "GC=F",       "Copper": "HG=F",  "SP500": "^GSPC",
+        "10Y_Yield": "^TNX",  "2Y_Yield": "^IRX",
+    }
+    df = yf.download(list(tickers.values()), start="2022-01-01", progress=False)['Close']
+    df = df.ffill().bfill()
+    df = df.rename(columns={v: k for k, v in tickers.items()})
     return df
 
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def build_decision(_adv):
-    df = _adv.copy()
-    w  = 252
-    df['Rule_Early_Warning']   = df['Early_Warning_Signal']  > df['Early_Warning_Signal'].rolling(w).mean() * 1.5
-    df['Rule_NonLinear_Jump']  = df['Macro_Fragility_Combo'] > df['Macro_Fragility_Combo'].rolling(w).mean() * 1.77
-    df['Rule_Correlation_Lock']= df['India_Global_Correlation'] > 0.8
-    frag_thresh = df['Fragility_Score'].rolling(w).mean() + 2 * df['Fragility_Score'].rolling(w).std()
-    df['Rule_Systemic_Brittle']= df['Fragility_Score'] > frag_thresh
-    df['Rule_Low_Vol_Trap']    = df['NSE_India_Vol'] < df['NSE_India_Vol'].rolling(w).mean() * 0.7
-    df['Final_Fragility_Score']= (
-        df['Rule_Early_Warning'].astype(int)    * 30 +
-        df['Rule_NonLinear_Jump'].astype(int)   * 30 +
-        df['Rule_Correlation_Lock'].astype(int) * 15 +
-        df['Rule_Systemic_Brittle'].astype(int) * 15 +
-        df['Rule_Low_Vol_Trap'].astype(int)     * 10
-    )
-    return df
+def get_realtime_data():
+    """Section 3 — sandbox baseline."""
+    tickers = {
+        "VIX": "^VIX", "10Y": "^TNX", "2Y": "^IRX",
+        "Gold": "GC=F", "Copper": "HG=F", "SP500": "^GSPC",
+    }
+    df = yf.download(list(tickers.values()), period="2y", progress=False)['Close']
+    df = df.ffill().bfill()
+    vol         = df['^VIX'].iloc[-1] / 100
+    yield_spread= (df['^TNX'] - df['^IRX']).iloc[-1]
+    returns     = df['^GSPC'].pct_change().dropna()
+    kurt        = returns.rolling(252).kurt().iloc[-1]
+    coupling    = 0.45
+    gold_copper = (df['GC=F'] / df['HG=F']).iloc[-1]
+    return vol, yield_spread, coupling, kurt, gold_copper
 
-@st.cache_data(show_spinner=False)
-def train_model(_df_labeled):
-    from sklearn.ensemble import RandomForestClassifier, IsolationForest
 
-    feat_cols = [c for c in _df_labeled.columns if any(x in c for x in ['Kurtosis','Vol','Correlation','Yield_Curve','Gold_Copper_Ratio'])]
-    X = _df_labeled[feat_cols].fillna(0)
-    y = _df_labeled['Is_Crisis']
+def calculate_metrics(df):
+    markets = ['NYSE','SP500','Euronext','LSE','JPX','SSE','NSE_India']
+    returns = df[markets].pct_change().dropna()
+    kurt    = returns.rolling(252).kurt().mean(axis=1).iloc[-1]
+    vol     = (returns.rolling(252).std().mean(axis=1) * np.sqrt(252)).iloc[-1]
+    corr_m  = returns.tail(60).corr()
+    coupling= corr_m.where(
+        np.triu(np.ones(corr_m.shape), k=1).astype(bool)
+    ).stack().mean()
+    yield_spread = (df['10Y_Yield'] - df['2Y_Yield']).iloc[-1]
+    stress  = (vol * 0.3389 + abs(yield_spread/100) * 0.2450
+               + coupling * 0.1463 + (kurt/15) * 0.1411)
+    index   = float(np.clip(stress / 0.5 * 100, 2.5, 98.5))
+    return index, stress
 
-    rf = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
-    rf.fit(X, y)
-    importances = pd.DataFrame({'Feature': feat_cols, 'Importance': rf.feature_importances_}).sort_values('Importance', ascending=False)
 
-    iso = IsolationForest(contamination=0.05, random_state=42)
-    iso.fit(X)
-
-    return rf, iso, importances, feat_cols
-
-def predict_prob(model, df, feat_cols):
-    latest = df[feat_cols].tail(1).fillna(0)
-    return model.predict_proba(latest)[0][1] * 100
-
-def taleb_knowledge(df_adv):
-    c_data = df_adv[df_adv['Is_Crisis'] == 1]
-    n_data = df_adv[df_adv['Is_Crisis'] == 0]
-    kurt_cols = [c for c in df_adv.columns if 'Kurtosis' in c]
-    fat_mult  = c_data[kurt_cols].mean().mean() / max(n_data[kurt_cols].mean().mean(), 0.001)
-    corr_n    = n_data['India_Global_Correlation'].mean()
-    corr_c    = c_data['India_Global_Correlation'].mean()
-    return fat_mult, corr_n, corr_c
-
-# ── HISTORICAL MIRROR ─────────────────────────────────────────────────
-HISTORICAL = [
-    {"year":"2008","name":"Lehman Brothers Collapse","score":95,"desc":"ธนาคารล้มเหลว, credit freeze, S&P -57%, VIX พุ่ง 80"},
-    {"year":"2020","name":"COVID-19 Black Swan",     "score":82,"desc":"VIX พุ่ง 85, ตลาดร่วง 34% ใน 33 วัน — เร็วที่สุดในประวัติศาสตร์"},
-    {"year":"2000","name":"Dot-com Bubble Burst",    "score":68,"desc":"NASDAQ -78%, tech sector wipeout กินเวลา 2.5 ปี"},
-    {"year":"1997","name":"Asian Financial Crisis",  "score":72,"desc":"THB collapse, ค่าเงินเอเชียพัง, IMF เข้าช่วยหลายประเทศ"},
-    {"year":"2022","name":"Rate Hike Shock",          "score":55,"desc":"Fed ขึ้นดอกเบี้ย 425bps ใน 1 ปี, bond market ร่วงหนักสุดใน 40 ปี"},
-]
-
-def find_mirror(score):
-    return sorted(HISTORICAL, key=lambda h: abs(h["score"] - score))[:3]
-
-# ── MONTE CARLO ──────────────────────────────────────────────────────
-def run_monte_carlo(current_score, n_paths=5000, months=12):
-    np.random.seed(42)
-    drift  = 0.008 if current_score > 50 else -0.005
-    sigma  = 0.06  + current_score * 0.0008
-    paths  = np.zeros((n_paths, months + 1))
-    paths[:, 0] = current_score
-    for t in range(1, months + 1):
-        shock = np.random.normal(drift, sigma, n_paths)
-        paths[:, t] = np.clip(paths[:, t-1] + shock * 10, 0, 100)
-
-    p5   = np.percentile(paths, 5, axis=0)
-    p50  = np.percentile(paths, 50, axis=0)
-    p95  = np.percentile(paths, 95, axis=0)
-    crisis_pct = (paths[:, -1] >= 75).mean() * 100
-    return p5, p50, p95, paths, crisis_pct
-
-# ════════════════════════════════════════════════════════════════════
-# SIDEBAR
-# ════════════════════════════════════════════════════════════════════
-with st.sidebar:
-    st.markdown("## ⚙️ CONTROLS")
-    st.caption("Scenario Simulator — ปรับค่าแล้ว Dashboard อัปเดตทันที")
-
-    oil_val   = st.slider("🛢 Crude Oil (USD/bbl)",  30, 200, 85)
-    rate_val  = st.slider("🏦 Fed Rate (%)",         0.0, 15.0, 5.25, 0.25)
-    gold_val  = st.slider("🥇 Gold (USD/oz)",        1000, 5000, 2320, 10)
-    vix_val   = st.slider("📊 VIX Index",            10, 90, 22)
-    yld_val   = st.slider("📈 US 10Y Yield (%)",     0.0, 12.0, 4.3, 0.1)
-    cny_val   = st.slider("🇨🇳 USD/CNY",             6.0, 9.0, 7.24, 0.01)
-
-    def scenario_risk(oil, rate, gold, vix, cny, yld):
-        r  = min(vix/90,  1) * 28
-        r += min(rate/15, 1) * 22
-        r += min(oil/200, 1) * 18
-        r += min(yld/12,  1) * 15
-        r += min((gold-1000)/4000, 1) * 10
-        r += min((cny-6)/3, 1) * 7
-        return round(r)
-
-    scen_score = scenario_risk(oil_val, rate_val, gold_val, vix_val, cny_val, yld_val)
-    sc = risk_color(scen_score)
-    st.markdown(f"""
-    <div class="risk-box" style="border-color:{sc};margin-top:16px">
-      <div class="metric-label">SCENARIO RISK SCORE</div>
-      <div class="metric-value" style="color:{sc};font-size:40px">{scen_score}</div>
-      <div style="color:{sc};font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700">{risk_label(scen_score)}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if scen_score < 20:   horizon = "> 24 months"
-    elif scen_score < 40: horizon = "~12–18 months"
-    elif scen_score < 60: horizon = "~6–9 months"
-    elif scen_score < 80: horizon = "~2–4 months"
-    else:                 horizon = "⚠️ IMMINENT"
-    st.caption(f"Crisis Horizon: **{horizon}**")
-
-    st.markdown("---")
-    run_mc = st.button("▶ RUN MONTE CARLO (5K paths)")
-    st.caption("Data cached 1 hr · Source: Yahoo Finance + FRED")
-
-# ════════════════════════════════════════════════════════════════════
-# MAIN — LOAD & PROCESS
-# ════════════════════════════════════════════════════════════════════
-st.markdown("# 🦢 BLACK SWAN PREDICTOR")
-st.caption("Systemic Risk Intelligence Engine · Taleb-inspired fragility framework")
-
-with st.spinner("⏳ กำลังดึงข้อมูลตลาดโลกและคำนวณ Fragility Index..."):
-    try:
-        df_input    = fetch_all_inputs()
-        df_frag     = build_fragility(df_input)
-        df_adv      = build_advanced(df_frag)
-        df_decision = build_decision(df_adv)
-        rf_model, iso_model, importance_df, feat_cols = train_model(df_adv)
-        current_risk  = predict_prob(rf_model, df_adv, feat_cols)
-        today_score   = int(df_decision['Final_Fragility_Score'].iloc[-1])
-        fat_mult, corr_n, corr_c = taleb_knowledge(df_adv)
-        data_ok = True
-    except Exception as e:
-        st.warning(f"⚠️ ไม่สามารถดึงข้อมูล Live ได้: {e}  \nแสดงผลจาก Scenario Simulator แทน")
-        data_ok    = False
-        current_risk = float(scen_score)
-        today_score  = scen_score
-
-display_score = today_score if data_ok else scen_score
-rc = risk_color(display_score)
-
-# ════════════════════════════════════════════════════════════════════
-# ROW 1 — KPI CARDS
-# ════════════════════════════════════════════════════════════════════
-k1, k2, k3, k4, k5 = st.columns(5)
-metrics = [
-    ("TODAY'S PROBABILITY", f"{current_risk:.1f}%", risk_color(current_risk)),
-    ("6-MONTH PROBABILITY",  f"{min(current_risk*3.1, 99):.1f}%", risk_color(current_risk*2)),
-    ("12-MONTH PROBABILITY", f"{min(current_risk*5.8, 99):.1f}%", risk_color(current_risk*3)),
-    ("FRAGILITY SCORE",      f"{display_score}/100", rc),
-    ("REGIME",               risk_label(display_score), rc),
-]
-for col, (label, val, color) in zip([k1,k2,k3,k4,k5], metrics):
-    col.markdown(f"""
-    <div class="metric-card">
-      <div class="metric-label">{label}</div>
-      <div class="metric-value" style="color:{color}">{val}</div>
-    </div>""", unsafe_allow_html=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# ════════════════════════════════════════════════════════════════════
-# ROW 2 — GAUGE + BUTTERFLY
-# ════════════════════════════════════════════════════════════════════
-col_gauge, col_butterfly = st.columns([1, 1])
-
-with col_gauge:
-    st.markdown("#### 🎯 Risk Gauge Meter")
-    angle = -135 + (display_score / 100) * 270
-    fig_gauge = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=display_score,
-        domain={'x':[0,1],'y':[0,1]},
-        title={'text': risk_label(display_score), 'font': {'color': rc, 'size': 16}},
-        number={'font': {'color': rc, 'size': 48}},
-        gauge={
-            'axis': {'range':[0,100], 'tickcolor':'#4a5268', 'tickfont':{'color':'#4a5268','size':10}},
-            'bar':  {'color': rc, 'thickness': 0.25},
-            'bgcolor': '#1e2230',
-            'bordercolor': '#2a2f3d',
-            'steps': [
-                {'range':[0,25],  'color':'rgba(34,197,94,0.15)'},
-                {'range':[25,50], 'color':'rgba(245,166,35,0.15)'},
-                {'range':[50,75], 'color':'rgba(255,140,0,0.15)'},
-                {'range':[75,100],'color':'rgba(255,59,78,0.20)'},
-            ],
-            'threshold': {'line':{'color':'white','width':3},'thickness':0.8,'value':display_score},
-        }
-    ))
-    fig_gauge.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font_color='#e8ecf5', height=300, margin=dict(t=30,b=10,l=30,r=30)
-    )
-    st.plotly_chart(fig_gauge, use_container_width=True)
-
-    # Probability breakdown
-    pc1, pc2, pc3 = st.columns(3)
-    for col_p, label, mult, clamp in [
-        (pc1, "TODAY",    0.045, 10),
-        (pc2, "6 MONTHS", 0.31,  99),
-        (pc3, "1 YEAR",   0.60,  99)
-    ]:
-        v = round(min(current_risk * mult, clamp), 1)
-        col_p.markdown(f"""<div class="metric-card">
-          <div class="metric-label">{label}</div>
-          <div class="metric-value" style="color:{risk_color(v*3)};font-size:22px">{v}%</div>
-        </div>""", unsafe_allow_html=True)
-
-with col_butterfly:
-    st.markdown("#### 🦋 Butterfly Effect Panel")
-    butterfly_data = [
-        {"Factor": "VIX (Fear Index)",        "Contribution": round(min(vix_val/90,1)*28,1),   "Color":"#ff3b4e"},
-        {"Factor": "Fed Rate",                "Contribution": round(min(rate_val/15,1)*22,1),  "Color":"#f5a623"},
-        {"Factor": "Crude Oil",               "Contribution": round(min(oil_val/200,1)*18,1),  "Color":"#ff8c00"},
-        {"Factor": "10Y Treasury Yield",      "Contribution": round(min(yld_val/12,1)*15,1),   "Color":"#a855f7"},
-        {"Factor": "Gold (Safe-Haven Demand)","Contribution": round(min((gold_val-1000)/4000,1)*10,1),"Color":"#3b82f6"},
-        {"Factor": "USD/CNY Pressure",        "Contribution": round(min((cny_val-6)/3,1)*7,1), "Color":"#22c55e"},
-    ]
-    bf_df = pd.DataFrame(butterfly_data).sort_values("Contribution", ascending=True)
-    fig_bf = go.Figure(go.Bar(
-        x=bf_df["Contribution"], y=bf_df["Factor"],
-        orientation='h',
-        marker_color=bf_df["Color"].tolist(),
-        text=[f"+{v}" for v in bf_df["Contribution"]],
-        textposition='outside', textfont=dict(color='#e8ecf5', size=11),
-    ))
-    fig_bf.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(showgrid=False, color='#4a5268', range=[0,32]),
-        yaxis=dict(showgrid=False, color='#e8ecf5'),
-        font_color='#e8ecf5', height=300, margin=dict(t=10,b=10,l=10,r=50),
-        showlegend=False
-    )
-    st.plotly_chart(fig_bf, use_container_width=True)
-
-    top_factor = bf_df.iloc[-1]["Factor"]
-    top_val    = bf_df.iloc[-1]["Contribution"]
-    st.markdown(f"""<div class="insight-box">
-    🔬 <b>AI Interpretation:</b> ปัจจัยหลักที่ขับเคลื่อนความเสี่ยงขณะนี้คือ <b>{top_factor}</b>
-    (+{top_val} pts จาก 100) — {'ระดับที่น่ากังวล ควรติดตามใกล้ชิด' if top_val > 15 else 'ระดับปกติ'}
-    ตาม Taleb Framework ความเสี่ยงสะสมแบบ Non-linear: เมื่อหลายปัจจัยพุ่งพร้อมกัน โอกาสเกิด
-    Black Swan ไม่ได้บวกกัน แต่ <b>คูณกัน</b>
-    </div>""", unsafe_allow_html=True)
-
-# ════════════════════════════════════════════════════════════════════
-# ROW 3 — HISTORICAL MIRROR + TALEB KNOWLEDGE
-# ════════════════════════════════════════════════════════════════════
-col_mirror, col_taleb = st.columns([1.2, 0.8])
-
-with col_mirror:
-    st.markdown("#### 🪞 Historical Mirror")
-    st.caption("ระบบจับคู่ pattern ปัจจุบันกับเหตุการณ์ในอดีต")
-    matches = find_mirror(display_score)
-    for i, h in enumerate(matches):
-        similarity = max(0, 100 - abs(h["score"] - display_score) * 1.5)
-        border = "#f5a623" if i == 0 else "#2a2f3d"
-        badge  = "🔴 TOP MATCH" if i == 0 else f"#{i+1} MATCH"
-        st.markdown(f"""
-        <div style="background:#111318;border:1px solid {border};border-radius:10px;
-                    padding:14px;margin-bottom:8px;position:relative">
-          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:#4a5268">{h['year']} · {badge}</span>
-          <div style="font-weight:700;font-size:14px;margin:4px 0">{h['name']}</div>
-          <span style="position:absolute;top:14px;right:14px;font-family:'JetBrains Mono',monospace;
-                       font-size:13px;color:#f5a623;font-weight:700">{similarity:.0f}% similar</span>
-          <div style="font-size:12px;color:#8892aa;line-height:1.5">{h['desc']}</div>
-          <div style="margin-top:8px;height:3px;background:#1e2230;border-radius:2px">
-            <div style="width:{similarity}%;height:100%;background:#f5a623;border-radius:2px"></div>
-          </div>
-        </div>""", unsafe_allow_html=True)
-
-with col_taleb:
-    st.markdown("#### 📖 Taleb Knowledge Base")
-    st.caption("สิ่งที่ AI เรียนรู้จาก 40 ปีของข้อมูล")
-    if data_ok:
-        st.markdown(f"""
-        <div class="insight-box">📐 <b>Fat-Tails:</b><br>
-        ช่วงวิกฤต Kurtosis สูงกว่าปกติ <b style="color:#ff3b4e">{fat_mult:.1f}x</b><br>
-        พิสูจน์ว่าตลาดไม่ได้เป็น Normal Distribution</div>
-        <div class="insight-box">🔗 <b>Correlation Breakdown:</b><br>
-        ปกติ: {corr_n:.2f} → วิกฤต: <b style="color:#ff3b4e">{corr_c:.2f}</b><br>
-        เมื่อวิกฤต สินทรัพย์ทั่วโลกร่วงพร้อมกัน Diversification ไม่ช่วย</div>
-        <div class="insight-box">🔇 <b>The Silence Before the Storm:</b><br>
-        VIX ต่ำผิดปกติ = <b style="color:#f5a623">Low Vol Trap</b><br>
-        ความสงบคือสัญญาณที่อันตรายที่สุด ตาม Taleb</div>
-        """, unsafe_allow_html=True)
+def estimate_black_swan_mc(stress, horizon_days=30, simulations=50000):
+    baseline_daily_prob = 1 / 5000
+    threshold = 0.0549
+    if stress > threshold:
+        risk_factor = np.power(stress / threshold, 1.15)
     else:
-        st.markdown("""
-        <div class="insight-box">⚠️ ต้องการข้อมูล Live เพื่อแสดง Taleb Analysis<br>
-        กรุณาตรวจสอบ internet connection และ API keys</div>
+        risk_factor = stress / threshold
+    draws = np.random.random((simulations, horizon_days))
+    return float((np.any(draws < (baseline_daily_prob * risk_factor), axis=1).sum()
+                  / simulations) * 100)
+
+
+def get_stress_score(v, y, c, k):
+    return (v * 0.3389 + abs(y/100) * 0.2450 + c * 0.1463 + (k/15) * 0.1411)
+
+
+def risk_color(p):
+    if p < 5:   return "#10B981"
+    if p < 15:  return "#F59E0B"
+    return "#EF4444"
+
+def risk_bg(p):
+    if p < 5:   return "#ECFDF5"
+    if p < 15:  return "#FFF7ED"
+    return "#FEF2F2"
+
+def gauge_status(idx):
+    if idx >= 70: return "CRITICAL", "#EF4444", "ระบบมีความเปราะบางสูงมาก เสี่ยงต่อการเกิดภาวะ Black Swan"
+    if idx >= 35: return "ELEVATED", "#F59E0B", "ระบบมีความเครียดสะสมเหนือระดับปกติ ควรเพิ่มความระมัดระวัง"
+    return "NORMAL", "#10B981", "สภาวะตลาดโลกมีความยืดหยุ่นสูง ความเสี่ยงเชิงระบบอยู่ในเกณฑ์ต่ำ"
+
+
+# ════════════════════════════════════════════════════════════
+# ── APP TITLE BAR ─────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════
+import datetime
+now_str = datetime.datetime.now().strftime("%d %b %Y · %H:%M UTC")
+
+st.markdown(f"""
+<div class="app-title-bar">
+  <div>
+    <div style="font-size:1.9rem;font-weight:700;color:#F1F5F9;letter-spacing:.01em">
+      🦢 Black Swan Event Prediction Model
+    </div>
+    <div style="color:#94A3B8;font-size:.95rem;margin-top:6px">
+      Systemic Risk Intelligence · Long-horizon Data (Since 1975) · Monte Carlo Engine
+    </div>
+  </div>
+  <div style="text-align:right">
+    <div style="color:#94A3B8;font-size:.82rem;font-family:monospace">{now_str}</div>
+    <div style="color:#38BDF8;font-size:.82rem;margin-top:4px;font-family:monospace">
+      ⟳ Data refreshes every 1 hr
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ════════════════════════════════════════════════════════════
+# FETCH ALL DATA ONCE
+# ════════════════════════════════════════════════════════════
+with st.spinner("กำลังดึงข้อมูลตลาดโลก…"):
+    df_raw, df_norm, latest, prev = fetch_historical_data()
+    hist_ok = df_raw is not None
+
+with st.spinner("กำลังคำนวณ Systemic Stress…"):
+    try:
+        data2       = get_market_data()
+        risk_index, stress_today = calculate_metrics(data2)
+        monthly_trend = 0.015
+        p_today = estimate_black_swan_mc(stress_today)
+        p_3m    = estimate_black_swan_mc(stress_today + (monthly_trend * 3 * 0.85))
+        p_6m    = estimate_black_swan_mc(stress_today + (monthly_trend * 6 * 0.70))
+        pred_ok = True
+    except Exception as e:
+        st.error(f"⚠️ Section 2 data error: {e}")
+        pred_ok = False
+
+with st.spinner("กำลังโหลด Sandbox baseline…"):
+    try:
+        v_real, y_real, c_real, k_real, g_real = get_realtime_data()
+        stress_real   = get_stress_score(v_real, y_real, c_real, k_real)
+        p_real_today  = estimate_black_swan_mc(stress_real)
+        p_real_3m     = estimate_black_swan_mc(stress_real + 0.012)
+        p_real_6m     = estimate_black_swan_mc(stress_real + 0.025)
+        sandbox_ok    = True
+    except Exception as e:
+        st.warning(f"⚠️ Sandbox baseline error: {e}")
+        sandbox_ok = False
+
+
+# ════════════════════════════════════════════════════════════
+# SECTION 1 — LIVE WATCHTOWER
+# ════════════════════════════════════════════════════════════
+st.markdown("""
+<div class="sec-header blue">
+  <div>
+    <div class="sec-tag">Section 1</div>
+    <p class="sec-title">🔭 Live Data Watchtower</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+if hist_ok:
+
+    # ── Row A: Global Equity (6 metrics) ─────────────────────────────
+    st.markdown("**🌎 Global Equity Indices**")
+    market_units = {
+        'NSE_India':'INR — Nifty 50',   'NYSE':'USD — Composite',
+        'SSE':'CNY — Composite',         'JPX':'JPY — Nikkei 225',
+        'Euronext':'EUR — Enext 100',    'LSE':'GBP — FTSE 100',
+    }
+    eq_cols = st.columns(6)
+    for col, (key, label) in zip(eq_cols, market_units.items()):
+        val  = latest.get(key, 0)
+        pval = prev.get(key, 1)
+        chg  = ((val - pval) / pval * 100) if pval else 0
+        col.metric(label, f"{val:,.0f}", f"{chg:+.2f}%")
+
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+    # ── Row B: Commodities + VIX (4 metrics) ─────────────────────────
+    st.markdown("**📊 Commodities & Macro Indicators**")
+    cm1, cm2, cm3, cm4, cm5 = st.columns(5)
+    cm1.metric("Gold (XAU/USD)",     f"${latest['Gold']:,.2f}",      "USD / oz")
+    cm2.metric("Brent Crude",        f"${latest['Crude_Oil']:.2f}",  "USD / bbl")
+    cm3.metric("USD Index",          f"{latest['USD_Index']:.2f}",   "Points")
+    cm4.metric("VIX Index",          f"{latest['VIX']:.2f}",
+               f"{latest['VIX']-prev['VIX']:+.2f}", delta_color="inverse")
+    if '10Y_Bond' in latest.index and '2Y_Bond' in latest.index:
+        spread = latest['10Y_Bond'] - latest['2Y_Bond']
+        cm5.metric("Yield Spread (10Y−2Y)", f"{spread:.2f}%",
+                   "Inverted ⚠️" if spread < 0 else "Normal ✓")
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    # ── Row C: Long-term chart ────────────────────────────────────────
+    with st.expander("📈 Long-term Growth Comparison (Since 1975 — Normalized, Log Scale)", expanded=True):
+        st.caption("ดัชนีบางตัวอาจเริ่มแสดงผลช้ากว่าปี 1975 ตามวันที่มีข้อมูลครั้งแรกในระบบ")
+        fig_lt = go.Figure()
+        colors = ["#3B82F6","#10B981","#F59E0B","#EF4444",
+                  "#8B5CF6","#06B6D4","#F97316","#64748B","#EC4899"]
+        for i, col in enumerate(df_norm.columns):
+            fig_lt.add_trace(go.Scatter(
+                x=df_norm.index, y=df_norm[col], name=col,
+                line=dict(width=1.4, color=colors[i % len(colors)])
+            ))
+        fig_lt.update_layout(
+            yaxis_type="log", template="plotly_white",
+            hovermode="x unified", height=520,
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='white',
+            legend=dict(orientation="h", y=1.08, font=dict(size=11)),
+            yaxis=dict(title="Growth Index (Base 100)", gridcolor="#F1F5F9"),
+            xaxis=dict(title="Year", gridcolor="#F1F5F9"),
+            margin=dict(t=10, b=40, l=10, r=10),
+        )
+        st.plotly_chart(fig_lt, use_container_width=True)
+
+else:
+    st.error("ไม่สามารถดึงข้อมูลตลาดได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต")
+
+
+# ════════════════════════════════════════════════════════════
+# SECTION 2 — PREDICTION
+# ════════════════════════════════════════════════════════════
+st.markdown("<hr class='swan-hr'>", unsafe_allow_html=True)
+st.markdown("""
+<div class="sec-header green">
+  <div>
+    <div class="sec-tag">Section 2</div>
+    <p class="sec-title">🔮 Prediction of Black Swan Event</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+if pred_ok:
+    status, s_color, s_desc = gauge_status(risk_index)
+
+    # ── Left: Gauge · Right: Forecast ────────────────────────────────
+    col_gauge, col_forecast = st.columns([1, 1], gap="large")
+
+    with col_gauge:
+        st.markdown("**📊 Global Systemic Risk Index**")
+
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number", value=risk_index,
+            number={'font': {'size': 72, 'color': '#1E293B'}, 'valueformat': '.1f'},
+            gauge={
+                'axis': {'range': [0, 100], 'tickwidth': 1,
+                         'tickcolor': '#94A3B8'},
+                'bar':  {'color': s_color, 'thickness': 0.25},
+                'bgcolor': 'white',
+                'bordercolor': '#E2E8F0',
+                'steps': [
+                    {'range': [0,  35], 'color': '#D1FAE5'},
+                    {'range': [35, 70], 'color': '#FEF9C3'},
+                    {'range': [70, 100],'color': '#FEE2E2'},
+                ],
+                'threshold': {
+                    'line': {'color': "#EF4444", 'width': 4},
+                    'thickness': 0.8, 'value': 90,
+                },
+            },
+        ))
+        fig_gauge.update_layout(
+            height=360, margin=dict(t=20, b=0, l=10, r=10),
+            paper_bgcolor='rgba(0,0,0,0)',
+        )
+        st.plotly_chart(fig_gauge, use_container_width=True)
+
+        st.markdown(f"""
+        <div class="status-box" style="border-top:5px solid {s_color}">
+          <h2 style="color:{s_color};margin:0;font-weight:700">{status}</h2>
+          <p style="color:#64748B;margin-top:8px;font-size:1rem">{s_desc}</p>
+          <p style="color:#94A3B8;font-size:.85rem;margin-top:6px">
+            Systemic Stress Index: <strong>{stress_today:.4f}</strong>
+          </p>
+        </div>
         """, unsafe_allow_html=True)
 
-# ════════════════════════════════════════════════════════════════════
-# ROW 4 — FRAGILITY SCORE HISTORY (ถ้ามีข้อมูล)
-# ════════════════════════════════════════════════════════════════════
-if data_ok:
-    st.markdown("---")
-    st.markdown("#### 📉 Fragility Score History (1995–Today)")
+    with col_forecast:
+        st.markdown("**🔮 Black Swan Probability Forecast**")
 
-    fig_hist = make_subplots(rows=2, cols=1, row_heights=[0.7, 0.3], shared_xaxes=True, vertical_spacing=0.06)
+        # Probability cards
+        fc1, fc2, fc3 = st.columns(3)
+        for col_f, (lbl, val, base) in zip(
+            [fc1, fc2, fc3],
+            [("Today", p_today, None),
+             ("3M Forward", p_3m, p_today),
+             ("6M Forward", p_6m, p_today)],
+        ):
+            clr  = risk_color(val)
+            bg   = risk_bg(val)
+            delta_str = f"{val-base:+.2f}%" if base is not None else ""
+            col_f.markdown(f"""
+            <div style="background:{bg};border:1.5px solid {clr};border-radius:12px;
+                        padding:18px;text-align:center">
+              <div style="font-size:.8rem;color:#64748B;font-weight:600;
+                          text-transform:uppercase;letter-spacing:.06em">{lbl}</div>
+              <div style="font-size:2.2rem;font-weight:700;color:{clr};margin:6px 0">
+                {val:.2f}%
+              </div>
+              <div style="font-size:.82rem;color:{clr}">{delta_str}</div>
+            </div>""", unsafe_allow_html=True)
 
-    plot_df = df_decision.tail(3000).copy()
-    fig_hist.add_trace(go.Scatter(
-        x=plot_df.index, y=plot_df['Final_Fragility_Score'],
-        fill='tozeroy', fillcolor='rgba(245,166,35,0.1)',
-        line=dict(color='#f5a623', width=1.5), name='Fragility Score'
-    ), row=1, col=1)
-    fig_hist.add_hline(y=60, line_dash="dash", line_color="rgba(255,59,78,0.5)", row=1, col=1)
-    fig_hist.add_hline(y=30, line_dash="dash", line_color="rgba(34,197,94,0.4)",  row=1, col=1)
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
-    # Shade crisis periods
-    crisis_df = plot_df[plot_df['Is_Crisis'] == 1]
-    fig_hist.add_trace(go.Scatter(
-        x=crisis_df.index, y=[100]*len(crisis_df),
-        fill='tozeroy', fillcolor='rgba(255,59,78,0.08)',
-        line=dict(color='rgba(0,0,0,0)'), name='Crisis Period', showlegend=True
-    ), row=1, col=1)
-
-    # VIX if available
-    if 'VIX' in df_input.columns:
-        fig_hist.add_trace(go.Scatter(
-            x=plot_df.index, y=df_input.loc[plot_df.index, 'VIX'],
-            line=dict(color='#ff3b4e', width=1), name='VIX', opacity=0.8
-        ), row=2, col=1)
-
-    fig_hist.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font_color='#e8ecf5', height=420,
-        legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color='#8892aa', size=11)),
-        margin=dict(t=10, b=10, l=10, r=10),
-        xaxis2=dict(showgrid=False, color='#4a5268'),
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.04)', color='#4a5268', range=[0,105]),
-        yaxis2=dict(showgrid=False, color='#4a5268'),
-    )
-    st.plotly_chart(fig_hist, use_container_width=True)
-
-    # Feature importance
-    st.markdown("#### 🧠 AI Feature Importance (Random Forest)")
-    imp_top = importance_df.head(8)
-    fig_imp = go.Figure(go.Bar(
-        x=imp_top['Feature'], y=imp_top['Importance'],
-        marker_color='#3b82f6',
-        text=[f"{v:.3f}" for v in imp_top['Importance']],
-        textposition='outside', textfont=dict(color='#e8ecf5', size=10)
-    ))
-    fig_imp.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font_color='#e8ecf5', height=280,
-        xaxis=dict(showgrid=False, color='#4a5268', tickangle=-30),
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.04)', color='#4a5268'),
-        margin=dict(t=20, b=80, l=10, r=10)
-    )
-    st.plotly_chart(fig_imp, use_container_width=True)
-
-# ════════════════════════════════════════════════════════════════════
-# ROW 5 — MONTE CARLO
-# ════════════════════════════════════════════════════════════════════
-st.markdown("---")
-st.markdown("#### 🎲 Black Swan Scenario Simulator (Monte Carlo)")
-
-if run_mc or True:  # always show on load
-    p5, p50, p95, all_paths, crisis_pct = run_monte_carlo(display_score, n_paths=2000)
-    months_label = ['Now'] + [f'M{i}' for i in range(1, 13)]
-
-    fig_mc = go.Figure()
-    # Plot a sample of raw paths
-    for i in range(0, 2000, 40):
-        fig_mc.add_trace(go.Scatter(
-            x=months_label, y=all_paths[i],
-            line=dict(color='rgba(245,166,35,0.04)', width=1),
-            showlegend=False, hoverinfo='skip'
+        # Probability path chart
+        df_path = pd.DataFrame({
+            "Timeline": ["Today", "3M Forward", "6M Forward"],
+            "Probability": [p_today, p_3m, p_6m],
+        })
+        fig_path = go.Figure()
+        fig_path.add_trace(go.Scatter(
+            x=df_path["Timeline"], y=df_path["Probability"],
+            mode="lines+markers+text",
+            line=dict(color="#3B82F6", width=2.5),
+            marker=dict(size=10, color="#3B82F6",
+                        line=dict(color="white", width=2)),
+            text=[f"{v:.2f}%" for v in df_path["Probability"]],
+            textposition="top center",
+            fill="tozeroy", fillcolor="rgba(59,130,246,.08)",
         ))
-    fig_mc.add_trace(go.Scatter(x=months_label, y=p95, line=dict(color='rgba(255,59,78,0.7)', width=1.5, dash='dot'), name='95th Pct'))
-    fig_mc.add_trace(go.Scatter(x=months_label, y=p50, line=dict(color='#f5a623', width=2.5), name='Median'))
-    fig_mc.add_trace(go.Scatter(x=months_label, y=p5,  line=dict(color='rgba(34,197,94,0.7)', width=1.5, dash='dot'), name='5th Pct'))
-    fig_mc.add_hline(y=75, line_dash="dash", line_color="rgba(255,59,78,0.5)", annotation_text="Crisis Threshold (75)")
-    fig_mc.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        font_color='#e8ecf5', height=360,
-        xaxis=dict(showgrid=False, color='#4a5268'),
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.04)', color='#4a5268', range=[0,105], title='Risk Score'),
-        legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color='#8892aa')),
-        margin=dict(t=20, b=20, l=10, r=10)
+        fig_path.update_layout(
+            height=220, template="plotly_white",
+            yaxis=dict(title="Probability (%)", range=[0, max(p_6m*1.4, 5)],
+                       gridcolor="#F1F5F9"),
+            xaxis=dict(gridcolor="#F1F5F9"),
+            margin=dict(t=10, b=10, l=10, r=10),
+            paper_bgcolor='rgba(0,0,0,0)',
+        )
+        st.plotly_chart(fig_path, use_container_width=True)
+
+        with st.expander("ℹ️ Methodology Insight"):
+            st.caption("""
+- **Daily Baseline:** อิงจากสถิติเหตุการณ์หายากระดับโลก (1 ใน 5,000 วันทำการ)
+- **Monte Carlo Engine:** จำลองเหตุการณ์ตลาดอนาคต 50,000 รูปแบบในแต่ละจุดเวลา
+- **Power Law Scaling:** ปรับระดับความเสี่ยงตามความเครียดเชิงระบบแบบ Non-linear
+- **Mean Reversion:** การพยากรณ์ระยะยาวรวมสมมติฐานการปรับตัวของกลไกตลาด
+            """)
+
+else:
+    st.warning("ไม่สามารถคำนวณ Prediction ได้ กรุณาตรวจสอบข้อมูล")
+
+
+# ════════════════════════════════════════════════════════════
+# SECTION 3 — SIMULATION PROBABILITY SANDBOX
+# ════════════════════════════════════════════════════════════
+st.markdown("<hr class='swan-hr'>", unsafe_allow_html=True)
+st.markdown("""
+<div class="sec-header violet">
+  <div>
+    <div class="sec-tag">Section 3</div>
+    <p class="sec-title">🎮 Simulation Probability Sandbox</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+if sandbox_ok:
+
+    # ── Controls (2 rows × 3 cols) ────────────────────────────────────
+    st.markdown("**⚙️ ปรับตัวแปรเพื่อจำลองสถานการณ์**")
+
+    ctrl1, ctrl2, ctrl3 = st.columns(3)
+    with ctrl1:
+        s_vol  = st.slider("📊 Volatility (VIX)",       0.05, 0.90, float(round(v_real, 3)))
+        s_kurt = st.slider("📐 Kurtosis (Fat-Tail)",    0.0,  20.0, float(round(k_real, 2)))
+    with ctrl2:
+        s_yield = st.slider("📈 Yield Spread",         -1.50,  1.50, float(round(y_real, 3)))
+        s_gold  = st.slider("🥇 Gold/Copper Ratio",   200.0, 1000.0, float(round(g_real, 1)))
+    with ctrl3:
+        s_coupling = st.slider("🌐 Global Coupling",    0.0,   1.0, float(c_real))
+        butterfly  = st.checkbox("🦋 Activate Butterfly Effect (Surprise Shock)")
+        if 'chaos_val' not in st.session_state:
+            st.session_state.chaos_val = float(np.random.uniform(1.4, 2.5))
+        chaos_mult = st.session_state.chaos_val if butterfly else 1.0
+
+    # ── Calculate simulation ──────────────────────────────────────────
+    stress_sim  = get_stress_score(s_vol, s_yield, s_coupling, s_kurt) * chaos_mult
+    p_sim_today = estimate_black_swan_mc(stress_sim)
+    p_sim_3m    = estimate_black_swan_mc(stress_sim + 0.015)
+    p_sim_6m    = estimate_black_swan_mc(stress_sim + 0.030)
+
+    bg_sim  = risk_bg(p_sim_today)
+    clr_sim = risk_color(p_sim_today)
+
+    if butterfly:
+        st.warning(f"🦋 Butterfly Effect Active — Stress multiplied ×{chaos_mult:.2f}")
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    # ── Result panel ──────────────────────────────────────────────────
+    st.markdown(
+        f"<div style='background:{bg_sim};border:2px solid {clr_sim};"
+        f"border-radius:18px;padding:24px 28px'>",
+        unsafe_allow_html=True,
     )
-    st.plotly_chart(fig_mc, use_container_width=True)
 
-    mc1, mc2, mc3, mc4 = st.columns(4)
-    mc_data = [
-        ("CRISIS PROBABILITY\n(12 months)", f"{crisis_pct:.1f}%", risk_color(crisis_pct)),
-        ("MEDIAN RISK\n(Month 6)",           f"{p50[6]:.1f}",      risk_color(p50[6])),
-        ("WORST CASE\n(95th Pct)",           f"{p95[-1]:.1f}",     risk_color(p95[-1])),
-        ("BEST CASE\n(5th Pct)",             f"{p5[-1]:.1f}",      risk_color(p5[-1])),
-    ]
-    for col_m, (label, val, color) in zip([mc1,mc2,mc3,mc4], mc_data):
-        col_m.markdown(f"""<div class="metric-card">
-          <div class="metric-label">{label}</div>
-          <div class="metric-value" style="color:{color}">{val}</div>
-        </div>""", unsafe_allow_html=True)
+    duck_col, result_col = st.columns([1, 2], gap="large")
 
-# ════════════════════════════════════════════════════════════════════
-# FOOTER
-# ════════════════════════════════════════════════════════════════════
-st.markdown("---")
-st.caption("""
-🦢 **Black Swan Predictor** · Inspired by Nassim Nicholas Taleb's *The Black Swan* & *Antifragile*
-· Data: Yahoo Finance, FRED · Model: Random Forest + Isolation Forest + Decision Rules
-· ⚠️ For educational purposes only — not financial advice
-""")
+    with duck_col:
+        # Duck GIF by risk level
+        if p_sim_today < 5:
+            tenor_id, label = "15568846810302620355", "🦢 Happy Duck"
+            text_color = clr_sim
+            shake_cls  = ""
+        elif p_sim_today < 15:
+            tenor_id, label = "13982082229451252813", "😰 Anxious Duck"
+            text_color = clr_sim
+            shake_cls  = ""
+        else:
+            tenor_id, label = "25805348", "🚨 PANIC DUCK!"
+            text_color = "#EF4444"
+            shake_cls  = "shake"
+
+        tenor_html = f"""
+        <style>
+          body{{margin:0;padding:0;display:flex;justify-content:center;
+               align-items:center;background:transparent}}
+          .tenor-gif-embed{{max-width:100% !important}}
+        </style>
+        <div class="{shake_cls}">
+          <div class="tenor-gif-embed"
+               data-postid="{tenor_id}"
+               data-share-method="host"
+               data-aspect-ratio="1.0"
+               data-width="100%">
+          </div>
+        </div>
+        <script type="text/javascript" async
+          src="https://tenor.com/embed.js"></script>
+        """
+        components.html(tenor_html, height=260)
+        st.markdown(
+            f"<div style='text-align:center;font-size:1.05rem;font-weight:600;"
+            f"color:{text_color};margin-top:-8px'>{label}</div>",
+            unsafe_allow_html=True,
+        )
+
+    with result_col:
+        st.markdown(
+            f"<div style='font-size:1.6rem;font-weight:700;color:{clr_sim};"
+            f"margin-bottom:16px'>Simulated Risk: {p_sim_today:.2f}%</div>",
+            unsafe_allow_html=True,
+        )
+
+        # 3 metric tiles comparing sim vs real
+        sm1, sm2, sm3 = st.columns(3)
+        sm1.metric("Sim — Today",    f"{p_sim_today:.2f}%",
+                   delta=f"{p_sim_today-p_real_today:+.2f}%", delta_color="inverse")
+        sm2.metric("Sim — 3M",       f"{p_sim_3m:.2f}%",
+                   delta=f"{p_sim_3m-p_real_3m:+.2f}%",   delta_color="inverse")
+        sm3.metric("Sim — 6M",       f"{p_sim_6m:.2f}%",
+                   delta=f"{p_sim_6m-p_real_6m:+.2f}%",   delta_color="inverse")
+
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+        # ── Heatmap ───────────────────────────────────────────────────
+        vol_range   = np.linspace(max(0.05, s_vol - 0.2),  min(0.9, s_vol + 0.2),  10)
+        yield_range = np.linspace(s_yield - 1.0, s_yield + 1.0, 10)
+        z_prob = []
+        for y in yield_range:
+            row = []
+            for v in vol_range:
+                s = get_stress_score(v, y, s_coupling, s_kurt) * chaos_mult
+                row.append(estimate_black_swan_mc(s))
+            z_prob.append(row)
+
+        fig_heat = go.Figure(data=go.Heatmap(
+            z=z_prob,
+            x=np.round(vol_range, 2),
+            y=np.round(yield_range, 2),
+            colorscale='RdYlGn_r',
+            showscale=True,
+            colorbar=dict(title="Risk %", thickness=14),
+        ))
+        fig_heat.add_trace(go.Scatter(
+            x=[s_vol], y=[s_yield],
+            mode='markers+text',
+            marker=dict(color='white', size=14, symbol='star',
+                        line=dict(color='black', width=2)),
+            text=["YOU ARE HERE"], textposition="top center",
+            name="Current",
+        ))
+        fig_heat.update_layout(
+            title=dict(text="Risk Sensitivity Landscape (Volatility vs Yield Spread)",
+                       font=dict(size=13)),
+            xaxis_title="Volatility (Panic Level)",
+            yaxis_title="Yield Spread",
+            height=310,
+            margin=dict(t=40, b=10, l=10, r=10),
+            paper_bgcolor='rgba(0,0,0,0)',
+        )
+        st.plotly_chart(fig_heat, use_container_width=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)   # close result panel
+
+else:
+    st.warning("ไม่สามารถโหลด Sandbox baseline ได้")
+
+
+# ── Footer ────────────────────────────────────────────────────────────
+st.markdown("<hr class='swan-hr'>", unsafe_allow_html=True)
+st.caption(
+    "🦢 Black Swan Event Prediction Model  ·  "
+    "Data: Yahoo Finance  ·  "
+    "Framework: Antifragile Quantitative Risk (Taleb)  ·  "
+    "⚠️ For educational purposes only — not financial advice"
+)
